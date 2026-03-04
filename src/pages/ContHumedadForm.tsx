@@ -1,0 +1,371 @@
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import axios from 'axios'
+import toast from 'react-hot-toast'
+import { Beaker, Download, Loader2, Trash2 } from 'lucide-react'
+import {
+  getContHumedadEnsayoDetail,
+  saveAndDownloadContHumedadExcel,
+  saveContHumedadEnsayo,
+} from '@/services/api'
+import type { ContHumedadPayload, SiNoSelect } from '@/types'
+
+const DRAFT_KEY = 'cont_humedad_form_draft_v1'
+const DEBOUNCE_MS = 700
+
+const parseNum = (value: string) => {
+  if (value.trim() === '') return null
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+const yy = () => new Date().getFullYear().toString().slice(-2)
+
+const normalizeMuestra = (raw: string) => {
+  const value = raw.trim().toUpperCase()
+  if (!value) return ''
+  const compact = value.replace(/\s+/g, '')
+  const match = compact.match(/^(\d+)(?:-SU)?(?:-(\d{2}))?$/)
+  return match ? `${match[1]}-SU-${match[2] || yy()}` : value
+}
+
+const normalizeOt = (raw: string) => {
+  const value = raw.trim().toUpperCase()
+  if (!value) return ''
+  const compact = value.replace(/\s+/g, '')
+  const patterns = [/^(?:N?OT-)?(\d+)(?:-(\d{2}))?$/, /^(\d+)(?:-(?:N?OT))?(?:-(\d{2}))?$/]
+  for (const pattern of patterns) {
+    const match = compact.match(pattern)
+    if (match) return `${match[1]}-${match[2] || yy()}`
+  }
+  return value
+}
+
+const normalizeDate = (raw: string) => {
+  const value = raw.trim()
+  if (!value) return ''
+  const digits = value.replace(/\D/g, '')
+  const pad = (s: string) => s.padStart(2, '0').slice(-2)
+  const build = (d: string, m: string, y: string = yy()) => `${pad(d)}/${pad(m)}/${pad(y)}`
+
+  if (value.includes('/')) {
+    const [d = '', m = '', yRaw = ''] = value.split('/').map((part) => part.trim())
+    if (!d || !m) return value
+    let y = yRaw.replace(/\D/g, '')
+    if (y.length === 4) y = y.slice(-2)
+    if (y.length === 1) y = `0${y}`
+    if (!y) y = yy()
+    return build(d, m, y)
+  }
+
+  if (digits.length === 4) return build(digits.slice(0, 2), digits.slice(2, 4))
+  if (digits.length === 6) return build(digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 6))
+  if (digits.length >= 8) return build(digits.slice(0, 2), digits.slice(2, 4), digits.slice(6, 8))
+  return value
+}
+
+const getEnsayoId = () => {
+  const n = Number(new URLSearchParams(window.location.search).get('ensayo_id'))
+  return Number.isInteger(n) && n > 0 ? n : null
+}
+
+const initialState = (): ContHumedadPayload => ({
+  muestra: '',
+  numero_ot: '',
+  fecha_ensayo: '',
+  realizado_por: '',
+  numero_ensayo: 1,
+  recipiente_numero: '',
+  masa_recipiente_muestra_humedo_g: null,
+  masa_recipiente_muestra_seco_g: null,
+  masa_recipiente_muestra_seco_constante_g: null,
+  masa_agua_g: null,
+  masa_recipiente_g: null,
+  masa_muestra_seco_g: null,
+  contenido_humedad_pct: null,
+  tipo_muestra: '',
+  tamano_maximo_muestra_visual_in: '',
+  cumple_masa_minima_norma: '-',
+  se_excluyo_material: '-',
+  descripcion_material_excluido: '',
+  balanza_01g_codigo: 'EQP-0046',
+  horno_110c_codigo: 'EQP-0049',
+  observaciones: '',
+  revisado_por: '-',
+  revisado_fecha: '',
+  aprobado_por: '-',
+  aprobado_fecha: '',
+})
+
+const n = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+
+const computePayload = (payload: ContHumedadPayload): ContHumedadPayload => {
+  const next = { ...payload }
+  const row3 = n(next.masa_recipiente_muestra_humedo_g)
+  const row4 = n(next.masa_recipiente_muestra_seco_g)
+  const row5 = n(next.masa_recipiente_muestra_seco_constante_g)
+  const row7 = n(next.masa_recipiente_g)
+
+  if (row3 != null && row4 != null) next.masa_agua_g = Number((row3 - row4).toFixed(4))
+  if (row5 != null && row7 != null) next.masa_muestra_seco_g = Number((row5 - row7).toFixed(4))
+  if (n(next.masa_agua_g) != null && n(next.masa_muestra_seco_g) != null && next.masa_muestra_seco_g !== 0) {
+    next.contenido_humedad_pct = Number(((next.masa_agua_g! / next.masa_muestra_seco_g!) * 100).toFixed(4))
+  }
+
+  if (next.se_excluyo_material !== 'SI') next.descripcion_material_excluido = ''
+  return next
+}
+
+export default function ContHumedadForm() {
+  const [form, setForm] = useState<ContHumedadPayload>(() => initialState())
+  const [loading, setLoading] = useState(false)
+  const [loadingEdit, setLoadingEdit] = useState(false)
+  const [ensayoId, setEnsayoId] = useState<number | null>(() => getEnsayoId())
+
+  useEffect(() => {
+    const raw = localStorage.getItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`)
+    if (!raw) return
+    try {
+      setForm({ ...initialState(), ...JSON.parse(raw) })
+    } catch {
+      // ignore corrupted draft
+    }
+  }, [ensayoId])
+
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      localStorage.setItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`, JSON.stringify(form))
+    }, DEBOUNCE_MS)
+    return () => window.clearTimeout(t)
+  }, [form, ensayoId])
+
+  useEffect(() => {
+    if (!ensayoId) return
+    let disposed = false
+    const run = async () => {
+      setLoadingEdit(true)
+      try {
+        const detail = await getContHumedadEnsayoDetail(ensayoId)
+        if (!disposed && detail.payload) {
+          setForm({ ...initialState(), ...detail.payload })
+        }
+      } catch {
+        toast.error('No se pudo cargar ensayo de Contenido Humedad.')
+      } finally {
+        if (!disposed) setLoadingEdit(false)
+      }
+    }
+    void run()
+    return () => {
+      disposed = true
+    }
+  }, [ensayoId])
+
+  const computed = useMemo(() => computePayload(form), [form])
+
+  const setField = useCallback(<K extends keyof ContHumedadPayload>(k: K, v: ContHumedadPayload[K]) => {
+    setForm((prev) => ({ ...prev, [k]: v }))
+  }, [])
+
+  const setSelect = useCallback((k: 'cumple_masa_minima_norma' | 'se_excluyo_material', v: SiNoSelect) => {
+    setForm((prev) => ({ ...prev, [k]: v }))
+  }, [])
+
+  const clearAll = useCallback(() => {
+    if (!window.confirm('Se limpiaran los datos no guardados. Deseas continuar?')) return
+    localStorage.removeItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`)
+    setForm(initialState())
+  }, [ensayoId])
+
+  const save = useCallback(async (download: boolean) => {
+    if (!form.muestra || !form.numero_ot || !form.fecha_ensayo || !form.realizado_por) {
+      return toast.error('Complete Muestra, N OT, Fecha y Realizado por.')
+    }
+
+    setLoading(true)
+    try {
+      const payload = computePayload(form)
+      if (download) {
+        const { blob, ensayoId: returnedId } = await saveAndDownloadContHumedadExcel(payload, ensayoId ?? undefined)
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `CONT_HUMEDAD_${form.numero_ot}_${new Date().toISOString().slice(0, 10)}.xlsx`
+        a.click()
+        URL.revokeObjectURL(url)
+        if (returnedId) setEnsayoId(returnedId)
+      } else {
+        const saved = await saveContHumedadEnsayo(payload, ensayoId ?? undefined)
+        setEnsayoId(saved.id)
+      }
+
+      localStorage.removeItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`)
+      setForm(initialState())
+      setEnsayoId(null)
+      if (window.parent !== window) window.parent.postMessage({ type: 'CLOSE_MODAL' }, '*')
+      toast.success(download ? 'Contenido de Humedad guardado y descargado.' : 'Contenido de Humedad guardado.')
+    } catch (err) {
+      const msg = axios.isAxiosError(err)
+        ? err.response?.data?.detail || 'No se pudo generar Contenido de Humedad.'
+        : 'No se pudo generar Contenido de Humedad.'
+      toast.error(msg)
+    } finally {
+      setLoading(false)
+    }
+  }, [ensayoId, form])
+
+  const inputClass = 'h-8 w-full rounded-md border border-slate-300 bg-white px-2 text-sm text-slate-900 shadow-sm transition focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500/35'
+  const roInputClass = `${inputClass} bg-slate-100`
+
+  return (
+    <div className="min-h-screen bg-slate-100 p-4 md:p-6">
+      <div className="mx-auto max-w-[1280px] space-y-4">
+        <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-sm">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-slate-50">
+            <Beaker className="h-5 w-5 text-slate-900" />
+          </div>
+          <div>
+            <h1 className="text-base font-semibold text-slate-900 md:text-lg">CONTENIDO DE HUMEDAD - ASTM C566-25</h1>
+            <p className="text-xs text-slate-600">Replica del formato Excel oficial</p>
+          </div>
+        </div>
+
+        {loadingEdit ? (
+          <div className="flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 shadow-sm">
+            <Loader2 className="h-4 w-4 animate-spin" /> Cargando ensayo...
+          </div>
+        ) : null}
+
+        <div className="overflow-hidden rounded-2xl border border-slate-300 bg-white shadow-sm">
+          <div className="border-b border-slate-300 bg-slate-50 px-4 py-4 text-center">
+            <p className="text-2xl font-semibold leading-tight text-slate-900">LABORATORIO DE ENSAYO DE MATERIALES</p>
+            <p className="text-xl font-semibold leading-tight text-slate-900">FORMATO N° F-LEM-P-AG-20.01</p>
+          </div>
+
+          <div className="border-b border-slate-300 bg-white px-3 py-3">
+            <table className="w-full table-fixed border border-slate-300 text-sm">
+              <thead className="bg-slate-100 text-xs font-semibold text-slate-800">
+                <tr>
+                  <th className="border-r border-slate-300 py-1">MUESTRA</th>
+                  <th className="border-r border-slate-300 py-1">N° OT</th>
+                  <th className="border-r border-slate-300 py-1">FECHA DE ENSAYO</th>
+                  <th className="py-1">REALIZADO</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="border-r border-t border-slate-300 p-1"><input className={inputClass} value={form.muestra} onChange={(e) => setField('muestra', e.target.value)} onBlur={() => setField('muestra', normalizeMuestra(form.muestra))} autoComplete="off" data-lpignore="true" /></td>
+                  <td className="border-r border-t border-slate-300 p-1"><input className={inputClass} value={form.numero_ot} onChange={(e) => setField('numero_ot', e.target.value)} onBlur={() => setField('numero_ot', normalizeOt(form.numero_ot))} autoComplete="off" data-lpignore="true" /></td>
+                  <td className="border-r border-t border-slate-300 p-1"><input className={inputClass} value={form.fecha_ensayo} onChange={(e) => setField('fecha_ensayo', e.target.value)} onBlur={() => setField('fecha_ensayo', normalizeDate(form.fecha_ensayo))} autoComplete="off" data-lpignore="true" placeholder="DD/MM/AA" /></td>
+                  <td className="border-t border-slate-300 p-1"><input className={inputClass} value={form.realizado_por} onChange={(e) => setField('realizado_por', e.target.value)} autoComplete="off" data-lpignore="true" /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div className="border-b border-slate-300 bg-slate-100 px-4 py-3 text-center">
+            <p className="text-2xl font-semibold leading-tight text-slate-900">Standard Test Method for Total Evaporable Moisture Content of Aggregate by Drying</p>
+            <p className="text-2xl font-semibold text-slate-900">ASTM C566-25</p>
+          </div>
+
+          <div className="space-y-3 p-3">
+            <div className="overflow-hidden rounded-lg border border-slate-300">
+              <table className="w-full table-fixed text-sm">
+                <thead className="bg-slate-100 text-xs font-semibold text-slate-800">
+                  <tr>
+                    <th className="w-10 border-b border-r border-slate-300 py-1">#</th>
+                    <th className="border-b border-r border-slate-300 px-2 py-1 text-left">DESCRIPCION</th>
+                    <th className="w-20 border-b border-r border-slate-300 py-1">UND</th>
+                    <th className="w-56 border-b border-slate-300 py-1">ENSAYO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">1</td><td className="border-t border-r border-slate-300 px-2 py-1">N° de ensayo</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">N°</td><td className="border-t border-slate-300 p-1"><input type="number" step="1" className={inputClass} value={computed.numero_ensayo ?? ''} onChange={(e) => setField('numero_ensayo', parseNum(e.target.value))} /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">2</td><td className="border-t border-r border-slate-300 px-2 py-1">Recipiente N°</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">N°</td><td className="border-t border-slate-300 p-1"><input className={inputClass} value={form.recipiente_numero ?? ''} onChange={(e) => setField('recipiente_numero', e.target.value)} autoComplete="off" data-lpignore="true" /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">3</td><td className="border-t border-r border-slate-300 px-2 py-1">Masa de recipiente + muestra humedo</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">g</td><td className="border-t border-slate-300 p-1"><input type="number" step="any" className={inputClass} value={computed.masa_recipiente_muestra_humedo_g ?? ''} onChange={(e) => setField('masa_recipiente_muestra_humedo_g', parseNum(e.target.value))} /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">4</td><td className="border-t border-r border-slate-300 px-2 py-1">Masa de recipiente + muestra seco</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">g</td><td className="border-t border-slate-300 p-1"><input type="number" step="any" className={inputClass} value={computed.masa_recipiente_muestra_seco_g ?? ''} onChange={(e) => setField('masa_recipiente_muestra_seco_g', parseNum(e.target.value))} /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">5</td><td className="border-t border-r border-slate-300 px-2 py-1">Masa de recipiente + muestra seco (constante)</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">g</td><td className="border-t border-slate-300 p-1"><input type="number" step="any" className={inputClass} value={computed.masa_recipiente_muestra_seco_constante_g ?? ''} onChange={(e) => setField('masa_recipiente_muestra_seco_constante_g', parseNum(e.target.value))} /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">6</td><td className="border-t border-r border-slate-300 px-2 py-1">Masa de agua (3-4)</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">g</td><td className="border-t border-slate-300 p-1"><input type="number" step="any" readOnly className={roInputClass} value={computed.masa_agua_g ?? ''} /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">7</td><td className="border-t border-r border-slate-300 px-2 py-1">Masa de recipiente</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">g</td><td className="border-t border-slate-300 p-1"><input type="number" step="any" className={inputClass} value={computed.masa_recipiente_g ?? ''} onChange={(e) => setField('masa_recipiente_g', parseNum(e.target.value))} /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">8</td><td className="border-t border-r border-slate-300 px-2 py-1">Masa de muestra seco (5-7)</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">g</td><td className="border-t border-slate-300 p-1"><input type="number" step="any" readOnly className={roInputClass} value={computed.masa_muestra_seco_g ?? ''} /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1 text-center">9</td><td className="border-t border-r border-slate-300 px-2 py-1">Contenido de Humedad de la muestra (6/8*100)</td><td className="border-t border-r border-slate-300 px-2 py-1 text-center">%</td><td className="border-t border-slate-300 p-1"><input type="number" step="any" readOnly className={roInputClass} value={computed.contenido_humedad_pct ?? ''} /></td></tr>
+                  <tr><td className="border-t border-r border-slate-300 px-2 py-1"></td><td colSpan={3} className="border-t border-r border-slate-300 px-2 py-1 text-xs text-slate-600">Fuente: Elaboracion propia basada en la Norma ASTM C566-25. * Reporte al 0.1%.</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[1fr_420px]">
+              <div className="overflow-hidden rounded-lg border border-slate-300">
+                <table className="w-full text-sm">
+                  <tbody>
+                    <tr><td className="w-[58%] border-b border-r border-slate-300 px-2 py-1">* Tipo de muestra</td><td className="border-b border-slate-300 p-1"><input className={inputClass} value={form.tipo_muestra ?? ''} onChange={(e) => setField('tipo_muestra', e.target.value)} autoComplete="off" data-lpignore="true" /></td></tr>
+                    <tr><td className="border-b border-r border-slate-300 px-2 py-1">* Tamano maximo de la muestra (Visual) (in)</td><td className="border-b border-slate-300 p-1"><input className={inputClass} value={form.tamano_maximo_muestra_visual_in ?? ''} onChange={(e) => setField('tamano_maximo_muestra_visual_in', e.target.value)} autoComplete="off" data-lpignore="true" /></td></tr>
+                    <tr>
+                      <td className="border-b border-r border-slate-300 px-2 py-1">* La masa de la muestra cumple con lo requerido por la norma</td>
+                      <td className="border-b border-slate-300 px-1 py-1">
+                        <div className="grid grid-cols-3 gap-1">
+                          {(['-', 'SI', 'NO'] as const).map((value) => {
+                            const selected = (form.cumple_masa_minima_norma ?? '-') === value
+                            return (
+                              <button key={value} type="button" className={`h-8 rounded-md border text-xs font-semibold ${selected ? 'border-slate-700 bg-slate-200 text-slate-900' : 'border-slate-300 bg-white text-slate-700'}`} onClick={() => setSelect('cumple_masa_minima_norma', value)}>{value}</button>
+                            )
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="border-b border-r border-slate-300 px-2 py-1">* Se excluyo algun material de la muestra de ensayo</td>
+                      <td className="border-b border-slate-300 px-1 py-1">
+                        <div className="grid grid-cols-3 gap-1">
+                          {(['-', 'SI', 'NO'] as const).map((value) => {
+                            const selected = (form.se_excluyo_material ?? '-') === value
+                            return (
+                              <button key={value} type="button" className={`h-8 rounded-md border text-xs font-semibold ${selected ? 'border-slate-700 bg-slate-200 text-slate-900' : 'border-slate-300 bg-white text-slate-700'}`} onClick={() => setSelect('se_excluyo_material', value)}>{value}</button>
+                            )
+                          })}
+                        </div>
+                      </td>
+                    </tr>
+                    <tr><td className="border-r border-slate-300 px-2 py-1">Descripcion del material excluido</td><td className="p-1"><input className={inputClass} value={form.descripcion_material_excluido ?? ''} onChange={(e) => setField('descripcion_material_excluido', e.target.value)} disabled={(form.se_excluyo_material ?? '-') !== 'SI'} autoComplete="off" data-lpignore="true" /></td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-slate-300">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-100 text-xs font-semibold text-slate-800"><tr><th className="border-b border-r border-slate-300 py-1">Equipos utilizados</th><th className="border-b border-slate-300 py-1">Codigos</th></tr></thead>
+                  <tbody>
+                    <tr><td className="border-t border-r border-slate-300 px-2 py-1">Balanza 0.1 g</td><td className="border-t border-slate-300 p-1"><input className={inputClass} value={form.balanza_01g_codigo ?? ''} onChange={(e) => setField('balanza_01g_codigo', e.target.value)} autoComplete="off" data-lpignore="true" /></td></tr>
+                    <tr><td className="border-t border-r border-slate-300 px-2 py-1">Horno 110°C</td><td className="border-t border-slate-300 p-1"><input className={inputClass} value={form.horno_110c_codigo ?? ''} onChange={(e) => setField('horno_110c_codigo', e.target.value)} autoComplete="off" data-lpignore="true" /></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-slate-300">
+              <div className="border-b border-slate-300 bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-800">Observaciones</div>
+              <div className="p-2"><textarea className="w-full resize-none rounded-md border border-slate-300 bg-white px-2 py-2 text-sm text-slate-900 shadow-sm transition focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-500/35" rows={3} value={form.observaciones ?? ''} onChange={(e) => setField('observaciones', e.target.value)} autoComplete="off" data-lpignore="true" /></div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 xl:grid-cols-[280px_280px] xl:justify-end">
+              <div className="overflow-hidden rounded-lg border border-slate-300 bg-slate-50"><div className="border-b border-slate-300 px-2 py-1 text-sm font-semibold">Revisado</div><div className="space-y-2 p-2"><input className={inputClass} value={form.revisado_por ?? ''} onChange={(e) => setField('revisado_por', e.target.value)} autoComplete="off" data-lpignore="true" /><input className={inputClass} value={form.revisado_fecha ?? ''} onChange={(e) => setField('revisado_fecha', e.target.value)} onBlur={() => setField('revisado_fecha', normalizeDate(form.revisado_fecha ?? ''))} autoComplete="off" data-lpignore="true" placeholder="Fecha" /></div></div>
+              <div className="overflow-hidden rounded-lg border border-slate-300 bg-slate-50"><div className="border-b border-slate-300 px-2 py-1 text-sm font-semibold">Aprobado</div><div className="space-y-2 p-2"><input className={inputClass} value={form.aprobado_por ?? ''} onChange={(e) => setField('aprobado_por', e.target.value)} autoComplete="off" data-lpignore="true" /><input className={inputClass} value={form.aprobado_fecha ?? ''} onChange={(e) => setField('aprobado_fecha', e.target.value)} onBlur={() => setField('aprobado_fecha', normalizeDate(form.aprobado_fecha ?? ''))} autoComplete="off" data-lpignore="true" placeholder="Fecha" /></div></div>
+            </div>
+
+            <div className="border-t-2 border-blue-900 px-3 py-2 text-center text-[11px] leading-tight text-slate-700">
+              <p>WEB: www.geofal.com.pe E-MAIL: laboratorio@geofal.com.pe / geofal.sac@gmail.com</p>
+              <p>Av. Maranon 763, Los Olivos-Lima / Telefono 01 522-1851</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+          <button onClick={clearAll} disabled={loading} className="flex h-11 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white font-medium text-slate-900 shadow-sm transition hover:bg-slate-100 disabled:opacity-50"><Trash2 className="h-4 w-4" />Limpiar todo</button>
+          <button onClick={() => void save(false)} disabled={loading} className="h-11 rounded-lg border border-slate-900 bg-white font-semibold text-slate-900 shadow-sm transition hover:bg-slate-100 disabled:opacity-50">{loading ? 'Guardando...' : 'Guardar'}</button>
+          <button onClick={() => void save(true)} disabled={loading} className="flex h-11 items-center justify-center gap-2 rounded-lg border border-emerald-700 bg-emerald-700 font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:opacity-50">
+            {loading ? <><Loader2 className="h-4 w-4 animate-spin" />Procesando...</> : <><Download className="h-4 w-4" />Guardar y Descargar</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
