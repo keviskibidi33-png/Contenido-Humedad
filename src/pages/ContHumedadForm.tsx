@@ -11,6 +11,19 @@ import type { ContHumedadPayload, SiNoSelect } from '@/types'
 
 const DRAFT_KEY = 'cont_humedad_form_draft_v1'
 const DEBOUNCE_MS = 700
+const REVISORES = ['-', 'FABIAN LA ROSA'] as const
+const APROBADORES = ['-', 'IRMA COAQUIRA'] as const
+
+const EQUIPO_OPTIONS = {
+  balanza_01g_codigo: ['-', 'EQP-0046'],
+  horno_110c_codigo: ['-', 'EQP-0049'],
+} as const
+
+const withCurrentOption = (value: string | null | undefined, base: readonly string[]) => {
+  const current = (value ?? '').trim()
+  if (!current || base.includes(current)) return base
+  return [...base, current]
+}
 
 const parseNum = (value: string) => {
   if (value.trim() === '') return null
@@ -19,6 +32,13 @@ const parseNum = (value: string) => {
 }
 
 const yy = () => new Date().getFullYear().toString().slice(-2)
+const formatTodayShortDate = () => {
+  const d = new Date()
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yyPart = String(d.getFullYear()).slice(-2)
+  return `${dd}/${mm}/${yyPart}`
+}
 
 const normalizeMuestra = (raw: string) => {
   const value = raw.trim().toUpperCase()
@@ -71,7 +91,7 @@ const getEnsayoId = () => {
 const initialState = (): ContHumedadPayload => ({
   muestra: '',
   numero_ot: '',
-  fecha_ensayo: '',
+  fecha_ensayo: formatTodayShortDate(),
   realizado_por: '',
   numero_ensayo: 1,
   recipiente_numero: '',
@@ -87,13 +107,13 @@ const initialState = (): ContHumedadPayload => ({
   cumple_masa_minima_norma: '-',
   se_excluyo_material: '-',
   descripcion_material_excluido: '',
-  balanza_01g_codigo: 'EQP-0046',
-  horno_110c_codigo: 'EQP-0049',
+  balanza_01g_codigo: '-',
+  horno_110c_codigo: '-',
   observaciones: '',
   revisado_por: '-',
-  revisado_fecha: '',
+  revisado_fecha: formatTodayShortDate(),
   aprobado_por: '-',
-  aprobado_fecha: '',
+  aprobado_fecha: formatTodayShortDate(),
 })
 
 const n = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
@@ -334,8 +354,8 @@ export default function ContHumedadForm() {
                 <table className="w-full text-sm">
                   <thead className="bg-slate-100 text-xs font-semibold text-slate-800"><tr><th className="border-b border-r border-slate-300 py-1">Equipos utilizados</th><th className="border-b border-slate-300 py-1">Codigos</th></tr></thead>
                   <tbody>
-                    <tr><td className="border-t border-r border-slate-300 px-2 py-1">Balanza 0.1 g</td><td className="border-t border-slate-300 p-1"><input className={inputClass} value={form.balanza_01g_codigo ?? ''} onChange={(e) => setField('balanza_01g_codigo', e.target.value)} autoComplete="off" data-lpignore="true" /></td></tr>
-                    <tr><td className="border-t border-r border-slate-300 px-2 py-1">Horno 110°C</td><td className="border-t border-slate-300 p-1"><input className={inputClass} value={form.horno_110c_codigo ?? ''} onChange={(e) => setField('horno_110c_codigo', e.target.value)} autoComplete="off" data-lpignore="true" /></td></tr>
+                    <tr><td className="border-t border-r border-slate-300 px-2 py-1">Balanza 0.1 g</td><td className="border-t border-slate-300 p-1"><select className={inputClass} value={form.balanza_01g_codigo ?? '-'} onChange={(e) => setField('balanza_01g_codigo', e.target.value)}>{withCurrentOption(form.balanza_01g_codigo, EQUIPO_OPTIONS.balanza_01g_codigo).map((opt) => <option key={opt} value={opt}>{opt}</option>)}</select></td></tr>
+                    <tr><td className="border-t border-r border-slate-300 px-2 py-1">Horno 110°C</td><td className="border-t border-slate-300 p-1"><select className={inputClass} value={form.horno_110c_codigo ?? '-'} onChange={(e) => setField('horno_110c_codigo', e.target.value)}>{withCurrentOption(form.horno_110c_codigo, EQUIPO_OPTIONS.horno_110c_codigo).map((opt) => <option key={opt} value={opt}>{opt}</option>)}</select></td></tr>
                   </tbody>
                 </table>
               </div>
@@ -347,8 +367,24 @@ export default function ContHumedadForm() {
             </div>
 
             <div className="grid grid-cols-1 gap-3 xl:grid-cols-[280px_280px] xl:justify-end">
-              <div className="overflow-hidden rounded-lg border border-slate-300 bg-slate-50"><div className="border-b border-slate-300 px-2 py-1 text-sm font-semibold">Revisado</div><div className="space-y-2 p-2"><input className={inputClass} value={form.revisado_por ?? ''} onChange={(e) => setField('revisado_por', e.target.value)} autoComplete="off" data-lpignore="true" /><input className={inputClass} value={form.revisado_fecha ?? ''} onChange={(e) => setField('revisado_fecha', e.target.value)} onBlur={() => setField('revisado_fecha', normalizeDate(form.revisado_fecha ?? ''))} autoComplete="off" data-lpignore="true" placeholder="Fecha" /></div></div>
-              <div className="overflow-hidden rounded-lg border border-slate-300 bg-slate-50"><div className="border-b border-slate-300 px-2 py-1 text-sm font-semibold">Aprobado</div><div className="space-y-2 p-2"><input className={inputClass} value={form.aprobado_por ?? ''} onChange={(e) => setField('aprobado_por', e.target.value)} autoComplete="off" data-lpignore="true" /><input className={inputClass} value={form.aprobado_fecha ?? ''} onChange={(e) => setField('aprobado_fecha', e.target.value)} onBlur={() => setField('aprobado_fecha', normalizeDate(form.aprobado_fecha ?? ''))} autoComplete="off" data-lpignore="true" placeholder="Fecha" /></div></div>
+              <div className="overflow-hidden rounded-lg border border-slate-300 bg-slate-50">
+                <div className="border-b border-slate-300 px-2 py-1 text-sm font-semibold">Revisado</div>
+                <div className="space-y-2 p-2">
+                  <select className={inputClass} value={form.revisado_por ?? '-'} onChange={(e) => setField('revisado_por', e.target.value)}>
+                    {REVISORES.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                  <input className={inputClass} value={form.revisado_fecha ?? ''} onChange={(e) => setField('revisado_fecha', e.target.value)} onBlur={() => setField('revisado_fecha', normalizeDate(form.revisado_fecha ?? ''))} autoComplete="off" data-lpignore="true" placeholder="Fecha" />
+                </div>
+              </div>
+              <div className="overflow-hidden rounded-lg border border-slate-300 bg-slate-50">
+                <div className="border-b border-slate-300 px-2 py-1 text-sm font-semibold">Aprobado</div>
+                <div className="space-y-2 p-2">
+                  <select className={inputClass} value={form.aprobado_por ?? '-'} onChange={(e) => setField('aprobado_por', e.target.value)}>
+                    {APROBADORES.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                  <input className={inputClass} value={form.aprobado_fecha ?? ''} onChange={(e) => setField('aprobado_fecha', e.target.value)} onBlur={() => setField('aprobado_fecha', normalizeDate(form.aprobado_fecha ?? ''))} autoComplete="off" data-lpignore="true" placeholder="Fecha" />
+                </div>
+              </div>
             </div>
 
             <div className="border-t-2 border-blue-900 px-3 py-2 text-center text-[11px] leading-tight text-slate-700">
