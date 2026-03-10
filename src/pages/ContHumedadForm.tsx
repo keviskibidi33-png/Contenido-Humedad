@@ -94,7 +94,7 @@ const getEnsayoId = () => {
 const initialState = (): ContHumedadPayload => ({
   muestra: '',
   numero_ot: '',
-  fecha_ensayo: formatTodayShortDate(),
+  fecha_ensayo: '',
   realizado_por: '',
   numero_ensayo: 1,
   recipiente_numero: '',
@@ -325,27 +325,33 @@ export default function ContHumedadForm() {
                     <tr>
                       <td className="border-b border-r border-slate-300 px-2 py-1">* La masa de la muestra cumple con lo requerido por la norma</td>
                       <td className="border-b border-slate-300 px-1 py-1">
-                        <div className="grid grid-cols-3 gap-1">
-                          {(['-', 'SI', 'NO'] as const).map((value) => {
-                            const selected = (form.cumple_masa_minima_norma ?? '-') === value
-                            return (
-                              <button key={value} type="button" className={`h-8 rounded-md border text-xs font-semibold ${selected ? 'border-slate-700 bg-slate-200 text-slate-900' : 'border-slate-300 bg-white text-slate-700'}`} onClick={() => setSelect('cumple_masa_minima_norma', value)}>{value}</button>
-                            )
-                          })}
-                        </div>
+                        <select
+                          className={inputClass}
+                          value={form.cumple_masa_minima_norma ?? '-'}
+                          onChange={(e) => setSelect('cumple_masa_minima_norma', e.target.value as SiNoSelect)}
+                          autoComplete="off"
+                          data-lpignore="true"
+                        >
+                          {(['-', 'SI', 'NO'] as const).map((value) => (
+                            <option key={value} value={value}>{value}</option>
+                          ))}
+                        </select>
                       </td>
                     </tr>
                     <tr>
                       <td className="border-b border-r border-slate-300 px-2 py-1">* Se excluyo algun material de la muestra de ensayo</td>
                       <td className="border-b border-slate-300 px-1 py-1">
-                        <div className="grid grid-cols-3 gap-1">
-                          {(['-', 'SI', 'NO'] as const).map((value) => {
-                            const selected = (form.se_excluyo_material ?? '-') === value
-                            return (
-                              <button key={value} type="button" className={`h-8 rounded-md border text-xs font-semibold ${selected ? 'border-slate-700 bg-slate-200 text-slate-900' : 'border-slate-300 bg-white text-slate-700'}`} onClick={() => setSelect('se_excluyo_material', value)}>{value}</button>
-                            )
-                          })}
-                        </div>
+                        <select
+                          className={inputClass}
+                          value={form.se_excluyo_material ?? '-'}
+                          onChange={(e) => setSelect('se_excluyo_material', e.target.value as SiNoSelect)}
+                          autoComplete="off"
+                          data-lpignore="true"
+                        >
+                          {(['-', 'SI', 'NO'] as const).map((value) => (
+                            <option key={value} value={value}>{value}</option>
+                          ))}
+                        </select>
                       </td>
                     </tr>
                     <tr><td className="border-r border-slate-300 px-2 py-1">Descripcion del material excluido</td><td className="p-1"><input className={inputClass} value={form.descripcion_material_excluido ?? ''} onChange={(e) => setField('descripcion_material_excluido', e.target.value)} disabled={(form.se_excluyo_material ?? '-') !== 'SI'} autoComplete="off" data-lpignore="true" /></td></tr>
