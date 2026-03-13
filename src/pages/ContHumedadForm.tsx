@@ -134,7 +134,7 @@ const computePayload = (payload: ContHumedadPayload): ContHumedadPayload => {
     next.contenido_humedad_pct = Number(((next.masa_agua_g! / next.masa_muestra_seco_g!) * 100).toFixed(1))
   }
 
-  if (next.se_excluyo_material !== 'SI') next.descripcion_material_excluido = ''
+  // if (next.se_excluyo_material !== 'SI') next.descripcion_material_excluido = ''
   return next
 }
 
@@ -366,7 +366,7 @@ export default function ContHumedadForm() {
                         </select>
                       </td>
                     </tr>
-                    <tr><td className="border-r border-slate-300 px-2 py-1">Descripcion del material excluido</td><td className="p-1"><input className={inputClass} value={form.descripcion_material_excluido ?? ''} onChange={(e) => setField('descripcion_material_excluido', e.target.value)} disabled={(form.se_excluyo_material ?? '-') !== 'SI'} autoComplete="off" data-lpignore="true" /></td></tr>
+                    <tr><td className="border-r border-slate-300 px-2 py-1">Descripcion del material excluido</td><td className="p-1"><input className={inputClass} value={form.descripcion_material_excluido ?? ''} onChange={(e) => setField('descripcion_material_excluido', e.target.value)} autoComplete="off" data-lpignore="true" /></td></tr>
                   </tbody>
                 </table>
               </div>
