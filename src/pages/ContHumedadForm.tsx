@@ -3,12 +3,26 @@ import axios from 'axios'
 import toast from 'react-hot-toast'
 import { Beaker, Download, Loader2, Trash2 } from 'lucide-react'
 import {
+
+
   getContHumedadEnsayoDetail,
   saveAndDownloadContHumedadExcel,
   saveContHumedadEnsayo,
 } from '@/services/api'
 import type { ContHumedadPayload, SiNoSelect } from '@/types'
 import FormatConfirmModal from '../components/FormatConfirmModal'
+
+const buildFormatPreview = (sampleCode: string | undefined, materialCode: 'SU' | 'AG', ensayo: string) => {
+    const currentYear = new Date().getFullYear().toString().slice(-2)
+    const normalized = (sampleCode || '').trim().toUpperCase()
+    const fullMatch = normalized.match(/^(\d+)(?:-[A-Z0-9. ]+)?-(\d{2,4})$/)
+    const partialMatch = normalized.match(/^(\d+)(?:-(\d{2,4}))?$/)
+    const match = fullMatch || partialMatch
+    const numero = match?.[1] || 'xxxx'
+    const year = (match?.[2] || currentYear).slice(-2)
+    return `Formato N-${numero}-${materialCode}-${year} ${ensayo}`
+}
+
 
 const DRAFT_KEY = 'cont_humedad_form_draft_v1'
 const DEBOUNCE_MS = 700
@@ -208,7 +222,7 @@ export default function ContHumedadForm() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = `CONT_HUMEDAD_${form.numero_ot}_${new Date().toISOString().slice(0, 10)}.xlsx`
+        a.download = filename || `${buildFormatPreview(form.muestra, 'SU', 'CONT. HUMEDAD')}.xlsx`
         a.click()
         URL.revokeObjectURL(url)
         if (returnedId) setEnsayoId(returnedId)
@@ -421,7 +435,7 @@ export default function ContHumedadForm() {
       </div>
         <FormatConfirmModal
             open={pendingFormatAction !== null}
-            formatLabel={`Formato N-xxxx-SU-${new Date().getFullYear().toString().slice(-2)} CONT. HUMEDAD`}
+            formatLabel={buildFormatPreview(form.muestra, 'SU', 'CONT. HUMEDAD')}
             actionLabel={pendingFormatAction ? 'Guardar y Descargar' : 'Guardar'}
             onClose={() => setPendingFormatAction(null)}
             onConfirm={() => {
