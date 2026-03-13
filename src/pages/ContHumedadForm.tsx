@@ -128,10 +128,10 @@ const computePayload = (payload: ContHumedadPayload): ContHumedadPayload => {
   const row5 = n(next.masa_recipiente_muestra_seco_constante_g)
   const row7 = n(next.masa_recipiente_g)
 
-  if (row3 != null && row4 != null) next.masa_agua_g = Number((row3 - row4).toFixed(4))
-  if (row5 != null && row7 != null) next.masa_muestra_seco_g = Number((row5 - row7).toFixed(4))
+  if (row3 != null && row4 != null) next.masa_agua_g = Number((row3 - row4).toFixed(1))
+  if (row5 != null && row7 != null) next.masa_muestra_seco_g = Number((row5 - row7).toFixed(1))
   if (n(next.masa_agua_g) != null && n(next.masa_muestra_seco_g) != null && next.masa_muestra_seco_g !== 0) {
-    next.contenido_humedad_pct = Number(((next.masa_agua_g! / next.masa_muestra_seco_g!) * 100).toFixed(4))
+    next.contenido_humedad_pct = Number(((next.masa_agua_g! / next.masa_muestra_seco_g!) * 100).toFixed(1))
   }
 
   if (next.se_excluyo_material !== 'SI') next.descripcion_material_excluido = ''
