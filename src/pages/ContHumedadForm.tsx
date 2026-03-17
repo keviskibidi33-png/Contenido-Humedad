@@ -52,8 +52,8 @@ const normalizeMuestra = (raw: string) => {
   const value = raw.trim().toUpperCase()
   if (!value) return ''
   const compact = value.replace(/\s+/g, '')
-  const match = compact.match(/^(\d+)(?:-SU)?(?:-(\d{2}))?$/)
-  return match ? `${match[1]}-SU-${match[2] || yy()}` : value
+  const match = compact.match(/^(\d+)(?:-(?:SU|AG))?(?:-(\d{2}))?$/)
+  return match ? `${match[1]}-AG-${match[2] || yy()}` : value
 }
 
 const normalizeOt = (raw: string) => {
@@ -127,6 +127,12 @@ const initialState = (): ContHumedadPayload => ({
   aprobado_fecha: '',
 })
 
+const hydrateForm = (payload?: Partial<ContHumedadPayload> | null): ContHumedadPayload => ({
+  ...initialState(),
+  ...payload,
+  muestra: normalizeMuestra(payload?.muestra ?? ''),
+})
+
 const n = (v: number | null | undefined) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
 
 const computePayload = (payload: ContHumedadPayload): ContHumedadPayload => {
@@ -156,7 +162,7 @@ export default function ContHumedadForm() {
     const raw = localStorage.getItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`)
     if (!raw) return
     try {
-      setForm({ ...initialState(), ...JSON.parse(raw) })
+      setForm(hydrateForm(JSON.parse(raw)))
     } catch {
       // ignore corrupted draft
     }
@@ -177,7 +183,7 @@ export default function ContHumedadForm() {
       try {
         const detail = await getContHumedadEnsayoDetail(ensayoId)
         if (!disposed && detail.payload) {
-          setForm({ ...initialState(), ...detail.payload })
+          setForm(hydrateForm(detail.payload))
         }
       } catch {
         toast.error('No se pudo cargar ensayo de Contenido Humedad.')
@@ -222,7 +228,7 @@ export default function ContHumedadForm() {
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = filename || `${buildFormatPreview(form.muestra, 'SU', 'CONT. HUMEDAD')}.xlsx`
+        a.download = filename || `${buildFormatPreview(form.muestra, 'AG', 'CONT. HUMEDAD')}.xlsx`
         a.click()
         URL.revokeObjectURL(url)
         if (returnedId) setEnsayoId(returnedId)
@@ -231,7 +237,9 @@ export default function ContHumedadForm() {
         setEnsayoId(saved.id)
       }
 
-      localStorage.removeItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`)
+      const oldKey = `${DRAFT_KEY}:${ensayoId ?? 'new'}`
+      localStorage.removeItem(oldKey)
+      localStorage.removeItem(`${DRAFT_KEY}:new`)
       setForm(initialState())
       setEnsayoId(null)
       if (window.parent !== window) window.parent.postMessage({ type: 'CLOSE_MODAL' }, '*')
@@ -435,7 +443,7 @@ export default function ContHumedadForm() {
       </div>
         <FormatConfirmModal
             open={pendingFormatAction !== null}
-            formatLabel={buildFormatPreview(form.muestra, 'SU', 'CONT. HUMEDAD')}
+            formatLabel={buildFormatPreview(form.muestra, 'AG', 'CONT. HUMEDAD')}
             actionLabel={pendingFormatAction ? 'Guardar y Descargar' : 'Guardar'}
             onClose={() => setPendingFormatAction(null)}
             onConfirm={() => {
