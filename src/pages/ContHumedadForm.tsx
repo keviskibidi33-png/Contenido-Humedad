@@ -224,7 +224,7 @@ export default function ContHumedadForm() {
     try {
       const payload = computePayload(form)
       if (download) {
-        const { blob, ensayoId: returnedId } = await saveAndDownloadContHumedadExcel(payload, ensayoId ?? undefined)
+        const { blob, ensayoId: returnedId, filename } = await saveAndDownloadContHumedadExcel(payload, ensayoId ?? undefined)
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
