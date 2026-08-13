@@ -233,6 +233,8 @@ export default function ContHumedadForm() {
     setLoading(true)
     try {
       const payload = computePayload(form)
+      let savedId = ensayoId
+
       if (download) {
         const { blob, ensayoId: returnedId, filename } = await saveAndDownloadContHumedadExcel(payload, ensayoId ?? undefined)
         const url = URL.createObjectURL(blob)
@@ -241,19 +243,32 @@ export default function ContHumedadForm() {
         a.download = filename || `${buildFormatPreview(form.muestra, 'AG', 'CONT. HUMEDAD')}.xlsx`
         a.click()
         URL.revokeObjectURL(url)
-        if (returnedId) setEnsayoId(returnedId)
+        if (returnedId) savedId = returnedId
       } else {
         const saved = await saveContHumedadEnsayo(payload, ensayoId ?? undefined)
-        setEnsayoId(saved.id)
+        savedId = saved.id
       }
 
-      const oldKey = `${DRAFT_KEY}:${ensayoId ?? 'new'}`
-      localStorage.removeItem(oldKey)
-      localStorage.removeItem(`${DRAFT_KEY}:new`)
-      setForm(initialState())
-      setEnsayoId(null)
-      if (window.parent !== window) window.parent.postMessage({ type: 'CLOSE_MODAL' }, '*')
+      // Preservar el ID para ediciones posteriores sin duplicar registros
+      if (savedId && savedId !== ensayoId) {
+        setEnsayoId(savedId)
+        // Limpiar borrador "new" y actualizar URL con el ID real
+        localStorage.removeItem(`${DRAFT_KEY}:new`)
+        const newUrl = new URL(window.location.href)
+        newUrl.searchParams.set('ensayo_id', String(savedId))
+        window.history.replaceState(null, '', newUrl.toString())
+      }
+
+      // Limpiar borrador del estado anterior (el debounce volverá a persistir el estado actual)
+      localStorage.removeItem(`${DRAFT_KEY}:${ensayoId ?? 'new'}`)
+
       toast.success(download ? 'Contenido de Humedad guardado y descargado.' : 'Contenido de Humedad guardado.')
+
+      // El formulario queda cargado para seguir editando.
+      // Solo se cierra el modal si está embebido en un iframe.
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'ENSAYO_SAVED' }, '*')
+      }
     } catch (err) {
       const msg = axios.isAxiosError(err)
         ? err.response?.data?.detail || 'No se pudo generar Contenido de Humedad.'
